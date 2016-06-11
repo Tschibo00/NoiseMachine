@@ -18,6 +18,7 @@ Second row: Activate/mute oscillator 1-3
 Third row:  Select operator for oscillator 1+2: Add, Difference, XOR (threshold 100/128), XOR(threshold 40/128)
 Fourth row: Select operator for oscillator 3+result of 1+2: Add, Difference, XOR (threshold 100/128), XOR(threshold 40/128)
 */
+//wegwegew
 #define NUMBER_VOICES 3
 static byte i;
 static long j;
