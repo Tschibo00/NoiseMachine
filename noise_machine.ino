@@ -15,16 +15,17 @@ Experimental noise machine
 First row: Press button 1-3 and turn pots to configure oscillator 1-3
 	left: cutoff, middle: resonance, right: frequency
 Second row: Activate/mute oscillator 1-3
-Third row:  Select operator for oscillator 1+2: Add, Difference, XOR (threshold 100/128), XOR(threshold 40/128)
-Fourth row: Select operator for oscillator 3+result of 1+2: Add, Difference, XOR (threshold 100/128), XOR(threshold 40/128)
+Third row:  Select operator for oscillator 1+2: Add, Difference, XOR (threshold 200/255), XOR(threshold 40/255)
+Fourth row: Select operator for oscillator 3+result of 1+2: Add, Difference, XOR (threshold 200/255), XOR(threshold 40/255)
+Switch oscillator type of oscillator 1-3 by clicking left black button row (selected waveform is displayed on green LEDs)
 */
-//wegwegew
-#define NUMBER_VOICES 3
+//#define NUMBER_VOICES 3
 static byte i;
 static long j;
-static int16_t dist;
-static uint8_t selectedVoice=0;
-
+static int16_t dist, sumOsc, sumOld;
+static int8_t selectedVoice=0;
+static int8_t displayVoice = 0;
+/*
 // per voice parameters
 static uint16_t freq[NUMBER_VOICES];
 static uint16_t cnt[NUMBER_VOICES];
@@ -35,7 +36,7 @@ static int16_t cutoff[NUMBER_VOICES];
 static int16_t resonance[NUMBER_VOICES];
 static int16_t volSub[NUMBER_VOICES];        // 0=full volume, 255=silence
 static int16_t o_, lastO_, memO_;
-
+*/
 static uint16_t freq1=200,freq2=100,freq3=20;
 static uint16_t cnt1,cnt2,cnt3;
 static int16_t o1,o2,o3;
@@ -46,7 +47,7 @@ static int16_t resonance1=0,resonance2=0,resonance3=0;
 static int16_t volSub1=0,volSub2=0,volSub3=0;
 static bool active1=true, active2=false, active3=false;
 static uint8_t selectedOperator1, selectedOperator2;
-
+static uint8_t selectedWave1, selectedWave2, selectedWave3;
 
 static int16_t cutRead=0;
 static int16_t resRead=0;
@@ -57,14 +58,31 @@ static uint8_t blinker=0;
 #define WAVE1 1
 #define WAVE2 2
 #define WAVE3 3
-#define WAVE4 4
+#define FILTER 4
 const byte infoDisp[5*4] PROGMEM =
-  {B01000100,B10101010,B10101010,B01000100,      // octave 0
+  {B01000100,B10101010,B10101010,B01000100,      // octave 0	**NOT USED**
    B01000100,B10101100,B10100100,B01000100,      // octave 1
    B01001100,B10100010,B10100100,B01001110,      // octave 2
    B01001100,B10100110,B10100110,B01001100,      // octave 3
-   B01001010,B10101010,B10101110,B01000010,      // octave 4
+   B11101010,B10001010,B11001010,B10001011,      // filter
  };
+
+const uint8_t sinetable[256] = { 127,130,133,136,139,142,145,148,151,154,157,160,163,166,169,172,
+175,178,181,184,186,189,192,194,197,200,202,205,207,209,212,214,
+216,218,221,223,225,227,229,230,232,234,235,237,239,240,241,243,
+244,245,246,247,248,249,250,250,251,252,252,253,253,253,253,253,
+254,253,253,253,253,253,252,252,251,250,250,249,248,247,246,245,
+244,243,241,240,239,237,235,234,232,230,229,227,225,223,221,218,
+216,214,212,209,207,205,202,200,197,194,192,189,186,184,181,178,
+175,172,169,166,163,160,157,154,151,148,145,142,139,136,133,130,
+127,123,120,117,114,111,108,105,102,99,96,93,90,87,84,81,
+78,75,72,69,67,64,61,59,56,53,51,48,46,44,41,39,
+37,35,32,30,28,26,24,23,21,19,18,16,14,13,12,10,
+9,8,7,6,5,4,3,3,2,1,1,0,0,0,0,0,
+0,0,0,0,0,0,1,1,2,3,3,4,5,6,7,8,
+9,10,12,13,14,16,18,19,21,23,24,26,28,30,32,35,
+37,39,41,44,46,48,51,53,56,59,61,64,67,69,72,75,
+78,81,84,87,90,93,96,99,102,105,108,111,114,117,120,123 };
 
 static LedControl lc=LedControl();
 
@@ -186,7 +204,11 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
 //  osciBuffer[cnt[selectedVoice]>>9]=OCR0B;
 */
   cnt1+=freq1;              // timer will automatically wraparound at 65535
-  o1=(cnt1<32768?100:-100);    // square wave
+  switch (selectedWave1) {
+	case 0:	o1 = 127 - (cnt1 >> 8); break;     // sawtooth wave
+	case 1:	o1 = (cnt1<32768 ? 100 : -100); break;     // sawtooth wave
+	case 2:	o1 = sinetable[cnt1 >> 8] - 128; break;    // sine wave
+  }
   dist=o1-lastO1;                // LPF with resonance
   memO1+=dist*cutoff1/256;
   lastO1+=memO1+dist*resonance1/256;
@@ -196,7 +218,11 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
   o1=(o1<0?0:o1);
 
   cnt2+=freq2;              // timer will automatically wraparound at 65535
-  o2=(cnt2<32768?100:-100);    // square wave
+  switch (selectedWave2) {
+  case 0:	o2 = 127 - (cnt2 >> 8); break;     // sawtooth wave
+  case 1:	o2 = (cnt2<32768 ? 100 : -100); break;     // sawtooth wave
+  case 2:	o2 = sinetable[cnt2 >> 8] - 128; break;    // sine wave
+  }
   dist=o2-lastO2;                // LPF with resonance
   memO2+=dist*cutoff2/256;
   lastO2+=memO2+dist*resonance2/256;
@@ -206,7 +232,11 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
   o2=(o2<0?0:o2);
 
   cnt3+=freq3;              // timer will automatically wraparound at 65535
-  o3=(cnt3<32768?100:-100);    // square wave
+  switch (selectedWave3) {
+  case 0:	o3 = 127 - (cnt3 >> 8); break;     // sawtooth wave
+  case 1:	o3 = (cnt3<32768 ? 100 : -100); break;     // sawtooth wave
+  case 2:	o3 = sinetable[cnt3 >> 8] - 128; break;    // sine wave
+  }
   dist=o3-lastO3;                // LPF with resonance
   memO3+=dist*cutoff3/256;
   lastO3+=memO3+dist*resonance3/256;
@@ -227,10 +257,10 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
 		dist = abs(o1 - o2);
 		break;
 	case 2:
-		dist = ((((o1 > 100) && (o2 < 100)) || ((o1 < 100) && (o2 > 100))) ? 128 : 0);
+		dist = ((((o1 > 200) && (o2 < 200)) || ((o1 < 200) && (o2 > 200))) ? 255 : 0);
 		break;
 	case 3:
-		dist = ((((o1 > 40) && (o2 < 40))|| ((o1 < 40) && (o2 > 40))) ? 128 : 0);
+		dist = ((((o1 > 40) && (o2 < 40))|| ((o1 < 40) && (o2 > 40))) ? 255 : 0);
 		break;
   }
   switch (selectedOperator2) {
@@ -241,21 +271,30 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
 	  dist = abs(dist - o3);
 	  break;
   case 2:
-	  dist = ((((dist > 100) && (o3 < 100)) || ((dist < 100) && (o3 > 100))) ? 128 : 0);
+	  dist = ((((dist > 200) && (o3 < 200)) || ((dist < 200) && (o3 > 200))) ? 255 : 0);
 	  break;
   case 3:
-	  dist = ((((dist > 40) && (o3 < 40)) || ((dist < 40) && (o3 > 40))) ? 128 : 0);
+	  dist = ((((dist > 40) && (o3 < 40)) || ((dist < 40) && (o3 > 40))) ? 255 : 0);
 	  break;
   }
 
-  OCR0B=(dist<0?0:(dist>255?255:dist));
-  switch (selectedVoice) { 
-	case 0: osciBuffer[cnt1 >> 9] = o1; break; 
-	case 1: osciBuffer[cnt2 >> 9] = o2; break;
-	case 2: osciBuffer[cnt3 >> 9] = o3; break;
-  }
+  OCR0B =(dist<0?0:(dist>255?255:dist));
 
-}
+  if (displayVoice == -1) {
+	  switch (selectedVoice) {
+	  case 0: osciBuffer[cnt1 >> 9] = OCR0B; break;
+	  case 1: osciBuffer[cnt2 >> 9] = OCR0B; break;
+	  case 2: osciBuffer[cnt3 >> 9] = OCR0B; break;
+	  }
+  }
+  else {
+	  switch (selectedVoice) {
+	  case 0: osciBuffer[cnt1 >> 9] = o1; break;
+	  case 1: osciBuffer[cnt2 >> 9] = o2; break;
+	  case 2: osciBuffer[cnt3 >> 9] = o3; break;
+	  }
+  }
+ }
 
 /* Keyboard layout as follows:
 row 0-3: 16 keypad, rows counting from top to bottom, col 0-3 counting from left to right
@@ -389,7 +428,7 @@ ISR(TIMER2_COMPA_vect) {
   interruptWaiter=0;
 
   cutRead=analogRead(A0);
-  resRead=analogRead(A1);
+  resRead=1023-analogRead(A1);
   
   keypad_scan();
 
@@ -398,30 +437,53 @@ ISR(TIMER2_COMPA_vect) {
   volSub3 = 0;
 
   switch (getNotePress()) {
-    case -1:
-      showInfo(0);
-    break;
     case 0:
-      cutoff1=cutoff[0]=cutRead/4;
-      resonance1=resonance[0]=resRead-512;
-      freq1=freq[0]=analogRead(A2);
       selectedVoice=0;
+	  displayVoice = 0;
       showInfo(WAVE1);
     break;
     case 1:
-      cutoff2=cutoff[1]=cutRead/4;
-      resonance2=resonance[1]=resRead-512;
-      freq2=freq[1]=analogRead(A2);
       selectedVoice=1;
-      showInfo(WAVE2);
+	  displayVoice = 1;
+	  showInfo(WAVE2);
     break;
     case 2:
-      cutoff3=cutoff[2]=cutRead/4;
-      resonance3=resonance[2]=resRead-512;
-      freq3=freq[2]=analogRead(A2);
       selectedVoice=2;
-      showInfo(WAVE3);
+	  displayVoice = 2;
+	  showInfo(WAVE3);
     break;
+	default:
+		showInfo(0);
+		displayVoice = -1;
+	break;
+  }
+
+  switch (selectedVoice) {
+	  case 0:
+		  cutoff1 = cutRead / 4;
+		  resonance1 = resRead - 512;
+		  freq1 = analogRead(A2);
+	  break;
+	  case 1:
+		  cutoff2 = cutRead / 4;
+		  resonance2 = resRead - 512;
+		  freq2 = analogRead(A2);
+	  break;
+	  case 2:
+		  cutoff3 = cutRead / 4;
+		  resonance3 = resRead - 512;
+		  freq3 = analogRead(A2);
+	  break;
+  }
+
+  if (getKeyClick(4, 3)) {
+	  selectedWave1 = (selectedWave1+1)%3;
+  }
+  if (getKeyClick(4, 2)) {
+	  selectedWave2 = (selectedWave2 + 1) % 3;
+  }
+  if (getKeyClick(4, 1)) {
+	  selectedWave3 = (selectedWave3 + 1) % 3;
   }
 
   if (getKeyClick(0, 2)) active1 = !active1;
@@ -438,9 +500,9 @@ ISR(TIMER2_COMPA_vect) {
   if (getKeyPress(2, 0)) selectedOperator2 = 2;
   if (getKeyPress(3, 0)) selectedOperator2 = 3;
 
-  dispBuff[0] = 2 << (6 - selectedVoice);
-  dispBuff[1] = (active1 ? 128 : 0) | (active2 ? 64 : 0) | (active3 ? 32 : 0);
-  dispBuff[2] = 2 << (6 - selectedOperator1);
+  dispBuff[0] = (2 << (6 - selectedVoice))|(2<<(2-selectedWave1));
+  dispBuff[1] = ((active1 ? 128 : 0) | (active2 ? 64 : 0) | (active3 ? 32 : 0)) | (2 << (2 - selectedWave2));
+  dispBuff[2] = (2 << (6 - selectedOperator1)) | (2 << (2 - selectedWave3));
   dispBuff[3] = 2 << (6- selectedOperator2);
 
   for (int i=0; i<4; i++)                    // update display upper half
