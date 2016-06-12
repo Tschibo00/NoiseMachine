@@ -6,6 +6,7 @@
 *.gitattributes
 *.sln
 *.vcxproj.*
+__vm/
 
 # User-specific files
 *.suo
@@ -250,3 +251,4 @@ ModelManifest.xml
 # FAKE - F# Make
 .fake/
 /NoiseMachine/
+/copy
