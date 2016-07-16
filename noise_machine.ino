@@ -1,6 +1,6 @@
 #include <avr/pgmspace.h>
 #include "MyLedControl.h"
-//#include <EEPROM.h>
+#include <EEPROM.h>
 #include <Wire.h>
 
 #if defined(__AVR_ATmega328P__)
@@ -17,7 +17,9 @@ First row: Press button 1-3 and turn pots to configure oscillator 1-3
 Second row: Activate/mute oscillator 1-3
 Third row:  Select operator for oscillator 1+2: Add, Difference, XOR (threshold 200/255), XOR(threshold 40/255)
 Fourth row: Select operator for oscillator 3+result of 1+2: Add, Difference, XOR (threshold 200/255), XOR(threshold 40/255)
-Switch oscillator type of oscillator 1-3 by clicking left black button row (selected waveform is displayed on green LEDs)
+Switch oscillator type of oscillator 1-3 by clicking left black button row 1-3 (selected waveform is displayed on green LEDs)
+Press Black button top right +1-16 to load setting
+Press black button top right and the left to it simultaneously +1-16 to write setting
 */
 //#define NUMBER_VOICES 3
 static byte i;
@@ -37,6 +39,9 @@ static int16_t resonance[NUMBER_VOICES];
 static int16_t volSub[NUMBER_VOICES];        // 0=full volume, 255=silence
 static int16_t o_, lastO_, memO_;
 */
+
+static uint8_t selectedSetting=0;
+
 static uint16_t freq1=200,freq2=100,freq3=20;
 static uint16_t cnt1,cnt2,cnt3;
 static int16_t o1,o2,o3;
@@ -59,12 +64,16 @@ static uint8_t blinker=0;
 #define WAVE2 2
 #define WAVE3 3
 #define FILTER 4
-const byte infoDisp[5*4] PROGMEM =
+#define MODE_LOADSETTING 5
+#define MODE_WRITESETTING 6
+const byte infoDisp[7*4] PROGMEM =
   {B01000100,B10101010,B10101010,B01000100,      // octave 0	**NOT USED**
    B01000100,B10101100,B10100100,B01000100,      // octave 1
    B01001100,B10100010,B10100100,B01001110,      // octave 2
    B01001100,B10100110,B10100110,B01001100,      // octave 3
    B11101010,B10001010,B11001010,B10001011,      // filter
+   B10001100,B10001010,B10001010,B11101100,      // Ld=Load setting
+   B10010110,B10010101,B11110110,B11110101,      // Wr=Write setting
  };
 
 const uint8_t sinetable[256] = { 127,130,133,136,139,142,145,148,151,154,157,160,163,166,169,172,
@@ -280,20 +289,21 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
 
   OCR0B =(dist<0?0:(dist>255?255:dist));
 
-  if (displayVoice == -1) {
+/*  if (displayVoice == -1) {
 	  switch (selectedVoice) {
 	  case 0: osciBuffer[cnt1 >> 9] = OCR0B; break;
 	  case 1: osciBuffer[cnt2 >> 9] = OCR0B; break;
 	  case 2: osciBuffer[cnt3 >> 9] = OCR0B; break;
 	  }
   }
-  else {
-	  switch (selectedVoice) {
-	  case 0: osciBuffer[cnt1 >> 9] = o1; break;
-	  case 1: osciBuffer[cnt2 >> 9] = o2; break;
-	  case 2: osciBuffer[cnt3 >> 9] = o3; break;
+  else {*/
+	  switch (displayVoice) {
+      case -1: osciBuffer[cnt1 >> 9]=OCR0B;break;
+  	  case 0: osciBuffer[cnt1 >> 9] = o1; break;
+  	  case 1: osciBuffer[cnt2 >> 9] = o2; break;
+  	  case 2: osciBuffer[cnt3 >> 9] = o3; break;
 	  }
-  }
+//  }
  }
 
 /* Keyboard layout as follows:
@@ -379,6 +389,57 @@ void showInfo(byte textIndex) {
   }
 }
 
+void writeSetting() {
+  uint16_t targetAddr=selectedSetting*32;    // each setting uses 32 bytes
+  EEPROM.update(targetAddr++, freq1>>8);
+  EEPROM.update(targetAddr++, freq1&255);
+  EEPROM.update(targetAddr++, freq2>>8);
+  EEPROM.update(targetAddr++, freq2&255);
+  EEPROM.update(targetAddr++, freq3>>8);
+  EEPROM.update(targetAddr++, freq3&255);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff1>>8);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff1&255);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff2>>8);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff2&255);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff3>>8);
+  EEPROM.update(targetAddr++, (uint16_t)cutoff3&255);
+  EEPROM.update(targetAddr++, (uint16_t)resonance1>>8);
+  EEPROM.update(targetAddr++, (uint16_t)resonance1&255);
+  EEPROM.update(targetAddr++, (uint16_t)resonance2>>8);
+  EEPROM.update(targetAddr++, (uint16_t)resonance2&255);
+  EEPROM.update(targetAddr++, (uint16_t)resonance3>>8);
+  EEPROM.update(targetAddr++, (uint16_t)resonance3&255);
+  EEPROM.update(targetAddr++, (uint8_t)active1);
+  EEPROM.update(targetAddr++, (uint8_t)active2);
+  EEPROM.update(targetAddr++, (uint8_t)active3);
+  EEPROM.update(targetAddr++, selectedOperator1);
+  EEPROM.update(targetAddr++, selectedOperator2);
+  EEPROM.update(targetAddr++, selectedWave1);
+  EEPROM.update(targetAddr++, selectedWave2);
+  EEPROM.update(targetAddr++, selectedWave3);
+}
+
+void readSetting() {
+  uint16_t targetAddr=selectedSetting*32;    // each setting uses 32 bytes
+  freq1=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  freq2=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  freq3=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  cutoff1=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  cutoff2=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  cutoff3=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  resonance1=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  resonance2=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  resonance3=(EEPROM.read(targetAddr++)<<8)|EEPROM.read(targetAddr++);
+  active1=EEPROM.read(targetAddr++);
+  active2=EEPROM.read(targetAddr++);
+  active3=EEPROM.read(targetAddr++);
+  selectedOperator1=EEPROM.read(targetAddr++);
+  selectedOperator2=EEPROM.read(targetAddr++);
+  selectedWave1=EEPROM.read(targetAddr++);
+  selectedWave2=EEPROM.read(targetAddr++);
+  selectedWave3=EEPROM.read(targetAddr++);
+}
+
 void updateDispBuff(bool stuffIn[]) {
   for (int i=0; i<4; i++) {
     if (stuffIn[i<<2]) dispBuff[i]|=8;
@@ -436,27 +497,75 @@ ISR(TIMER2_COMPA_vect) {
   volSub2 = 0;
   volSub3 = 0;
 
-  switch (getNotePress()) {
-    case 0:
-      selectedVoice=0;
-	  displayVoice = 0;
-      showInfo(WAVE1);
+  int8_t clickedKey;
+  switch (getFunctionKeys()) {
+    case B10000000:                      // load pattern
+      showInfo(MODE_LOADSETTING);
+      clickedKey=getNoteClick();
+      if (clickedKey!=-1) {
+        selectedSetting=clickedKey;
+        readSetting();
+      }
     break;
-    case 1:
-      selectedVoice=1;
-	  displayVoice = 1;
-	  showInfo(WAVE2);
+    case B10001000:                      // write pattern
+      showInfo(MODE_WRITESETTING);
+      clickedKey=getNoteClick();
+      if (clickedKey!=-1) {
+        selectedSetting=clickedKey;
+        writeSetting();
+      }
     break;
-    case 2:
-      selectedVoice=2;
-	  displayVoice = 2;
-	  showInfo(WAVE3);
+    case B00000000:                      // enter notes
+    case B00000100:
+    case B00000010:
+    case B00000001:
+      switch (getNotePress()) {
+        case 0:
+          selectedVoice=0;
+    	    displayVoice = 0;
+          showInfo(WAVE1);
+        break;
+        case 1:
+          selectedVoice=1;
+    	    displayVoice = 1;
+    	    showInfo(WAVE2);
+        break;
+        case 2:
+          selectedVoice=2;
+    	    displayVoice = 2;
+    	    showInfo(WAVE3);
+        break;
+      	default:
+      		showInfo(0);
+          selectedVoice=-1;
+      		displayVoice = -1;
+      	break;
+      }
+      if (getKeyClick(4, 2)) {
+        selectedWave1 = (selectedWave1+1)%3;
+      }
+      if (getKeyClick(4, 1)) {
+        selectedWave2 = (selectedWave2 + 1) % 3;
+      }
+      if (getKeyClick(4, 0)) {
+        selectedWave3 = (selectedWave3 + 1) % 3;
+      }
+    
+      if (getKeyClick(0, 2)) active1 = !active1;
+      if (getKeyClick(1, 2)) active2 = !active2;
+      if (getKeyClick(2, 2)) active3 = !active3;
+    
+      if (getKeyPress(0, 1)) selectedOperator1 = 0;
+      if (getKeyPress(1, 1)) selectedOperator1 = 1;
+      if (getKeyPress(2, 1)) selectedOperator1 = 2;
+      if (getKeyPress(3, 1)) selectedOperator1 = 3;
+    
+      if (getKeyPress(0, 0)) selectedOperator2 = 0;
+      if (getKeyPress(1, 0)) selectedOperator2 = 1;
+      if (getKeyPress(2, 0)) selectedOperator2 = 2;
+      if (getKeyPress(3, 0)) selectedOperator2 = 3;
     break;
-	default:
-		showInfo(0);
-		displayVoice = -1;
-	break;
-  }
+ }
 
   switch (selectedVoice) {
 	  case 0:
@@ -475,30 +584,6 @@ ISR(TIMER2_COMPA_vect) {
 		  freq3 = analogRead(A2);
 	  break;
   }
-
-  if (getKeyClick(4, 3)) {
-	  selectedWave1 = (selectedWave1+1)%3;
-  }
-  if (getKeyClick(4, 2)) {
-	  selectedWave2 = (selectedWave2 + 1) % 3;
-  }
-  if (getKeyClick(4, 1)) {
-	  selectedWave3 = (selectedWave3 + 1) % 3;
-  }
-
-  if (getKeyClick(0, 2)) active1 = !active1;
-  if (getKeyClick(1, 2)) active2 = !active2;
-  if (getKeyClick(2, 2)) active3 = !active3;
-
-  if (getKeyPress(0, 1)) selectedOperator1 = 0;
-  if (getKeyPress(1, 1)) selectedOperator1 = 1;
-  if (getKeyPress(2, 1)) selectedOperator1 = 2;
-  if (getKeyPress(3, 1)) selectedOperator1 = 3;
-
-  if (getKeyPress(0, 0)) selectedOperator2 = 0;
-  if (getKeyPress(1, 0)) selectedOperator2 = 1;
-  if (getKeyPress(2, 0)) selectedOperator2 = 2;
-  if (getKeyPress(3, 0)) selectedOperator2 = 3;
 
   dispBuff[0] = (2 << (6 - selectedVoice))|(2<<(2-selectedWave1));
   dispBuff[1] = ((active1 ? 128 : 0) | (active2 ? 64 : 0) | (active3 ? 32 : 0)) | (2 << (2 - selectedWave2));
