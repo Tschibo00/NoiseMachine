@@ -1,7 +1,6 @@
 #include <avr/pgmspace.h>
 #include "MyLedControl.h"
 #include <EEPROM.h>
-#include <Wire.h>
 
 #if defined(__AVR_ATmega328P__)
 // Timer2 is the same on the mega328 and mega168
@@ -27,6 +26,7 @@ static long j;
 static int16_t dist, sumOsc, sumOld;
 static int8_t selectedVoice=0;
 static int8_t displayVoice = 0;
+static int8_t totalDisplayPointer=0;
 /*
 // per voice parameters
 static uint16_t freq[NUMBER_VOICES];
@@ -53,6 +53,7 @@ static int16_t volSub1=0,volSub2=0,volSub3=0;
 static bool active1=true, active2=false, active3=false;
 static uint8_t selectedOperator1, selectedOperator2;
 static uint8_t selectedWave1, selectedWave2, selectedWave3;
+static uint8_t operator1Value=40, operator2Value=40;
 
 static int16_t cutRead=0;
 static int16_t resRead=0;
@@ -104,7 +105,7 @@ static bool keyLocked[ROWS][COLS];
 static byte dispBuff[8];
 static uint8_t osciBuffer[128];
 
-#define OLED_I2C_ADDRESS   0x3C
+#define OLED_I2C_ADDRESS   0x3c
 #define OLED_CONTROL_BYTE_CMD_SINGLE	0x80
 #define OLED_CONTROL_BYTE_CMD_STREAM	0x00
 #define OLED_CONTROL_BYTE_DATA_STREAM	0x40
@@ -194,97 +195,97 @@ int restrictValue(int val, int min, int max) {
 }
 
 ISR(TIMER1_COMPA_vect){//timer 1 interrupt
-/*  for (int8_t voice=0; voice<NUMBER_VOICES; voice++) {
-    cnt[voice]+=freq[voice];              // timer will automatically wraparound at 65535
-    o_=(cnt[voice]<32768?100:-100);    // square wave
-    lastO_=lastO[voice];
-    dist=o_-lastO_;                // LPF with resonance
-    memO_=memO[voice];
-    memO_+=dist*cutoff[voice]/256;
-    lastO_+=memO_+dist*resonance[voice]/256;
-    lastO_=(lastO_<-128?-128:(lastO_>127?127:lastO_));      // constrain the value to -128..127
-    lastO[voice]=lastO_;
-    memO[voice]=(memO_<-128?-128:(memO_>127?127:memO_));          // constrain the value to -128..127
-    o_=lastO_-volSub[voice]+128;
-    o[voice]=(o_<0?0:o_);
-  }
-  dist=o[0]+o[1]+o[2]-384;
-  OCR0B=(dist<0?0:(dist>255?255:dist));
-//  osciBuffer[cnt[selectedVoice]>>9]=OCR0B;
-*/
-  cnt1+=freq1;              // timer will automatically wraparound at 65535
-  switch (selectedWave1) {
-	case 0:	o1 = 127 - (cnt1 >> 8); break;     // sawtooth wave
-	case 1:	o1 = (cnt1<32768 ? 100 : -100); break;     // sawtooth wave
-	case 2:	o1 = sinetable[cnt1 >> 8] - 128; break;    // sine wave
-  }
-  dist=o1-lastO1;                // LPF with resonance
-  memO1+=dist*cutoff1/256;
-  lastO1+=memO1+dist*resonance1/256;
-  lastO1=(lastO1<-128?-128:(lastO1>127?127:lastO1));      // constrain the value to -128..127
-  memO1=(memO1<-128?-128:(memO1>127?127:memO1));          // constrain the value to -128..127
-  o1=lastO1-volSub1+128;
-  o1=(o1<0?0:o1);
+  if (active1) {
+    cnt1+=freq1;              // timer will automatically wraparound at 65535
+    switch (selectedWave1) {
+    	case 0:	o1 = 127 - (cnt1 >> 8); break;     // sawtooth wave
+    	case 1:	o1 = (cnt1<32768 ? 100 : -100); break;     // square wave
+    	case 2:	o1 = sinetable[cnt1 >> 8] - 128; break;    // sine wave
+    }
+    dist=(o1-lastO1)>>1;                // LPF with resonance
+  //  memO1+=dist*cutoff1/256;
+  //  lastO1+=memO1+dist*resonance1/256;
+    memO1+=(dist*cutoff1)>>8;
+    lastO1+=memO1+(((int8_t)dist*(int8_t)(resonance1>>2))>>8);
+    lastO1=(lastO1<-128?-128:(lastO1>127?127:lastO1));      // constrain the value to -128..127
+    //memO1=(memO1<-128?-128:(memO1>127?127:memO1));          // constrain the value to -128..127
+  //  o1=lastO1-volSub1+128;
+      o1=lastO1+128;
+  } else
+    o1=0;
+//  o1=(o1<0?0:o1);
 
-  cnt2+=freq2;              // timer will automatically wraparound at 65535
-  switch (selectedWave2) {
-  case 0:	o2 = 127 - (cnt2 >> 8); break;     // sawtooth wave
-  case 1:	o2 = (cnt2<32768 ? 100 : -100); break;     // sawtooth wave
-  case 2:	o2 = sinetable[cnt2 >> 8] - 128; break;    // sine wave
-  }
-  dist=o2-lastO2;                // LPF with resonance
-  memO2+=dist*cutoff2/256;
-  lastO2+=memO2+dist*resonance2/256;
-  lastO2=(lastO2<-128?-128:(lastO2>127?127:lastO2));      // constrain the value to -128..127
-  memO2=(memO2<-128?-128:(memO2>127?127:memO2));          // constrain the value to -128..127
-  o2=lastO2-volSub2+128;
-  o2=(o2<0?0:o2);
+  if (active2) {
+    cnt2+=freq2;              // timer will automatically wraparound at 65535
+    switch (selectedWave2) {
+      case 0:	o2 = 127 - (cnt2 >> 8); break;     // sawtooth wave
+      case 1:	o2 = (cnt2<32768 ? 100 : -100); break;     // square wave
+      case 2:	o2 = sinetable[cnt2 >> 8] - 128; break;    // sine wave
+    }
+    dist=(o2-lastO2)>>1;                // LPF with resonance
+  //  memO2+=dist*cutoff2/256;
+  //  lastO2+=memO2+dist*resonance2/256;
+    memO2+=(dist*cutoff2)>>8;
+    lastO2+=memO2+(((int8_t)dist*(int8_t(resonance2>>2)))>>8);
+    lastO2=(lastO2<-128?-128:(lastO2>127?127:lastO2));      // constrain the value to -128..127
+  //  memO2=(memO2<-128?-128:(memO2>127?127:memO2));          // constrain the value to -128..127
+  //  o2=lastO2-volSub2+128;
+      o2=lastO2+128;
+  } else
+    o2=0;
+//  o2=(o2<0?0:o2);
 
-  cnt3+=freq3;              // timer will automatically wraparound at 65535
-  switch (selectedWave3) {
-  case 0:	o3 = 127 - (cnt3 >> 8); break;     // sawtooth wave
-  case 1:	o3 = (cnt3<32768 ? 100 : -100); break;     // sawtooth wave
-  case 2:	o3 = sinetable[cnt3 >> 8] - 128; break;    // sine wave
-  }
-  dist=o3-lastO3;                // LPF with resonance
-  memO3+=dist*cutoff3/256;
-  lastO3+=memO3+dist*resonance3/256;
-  lastO3=(lastO3<-128?-128:(lastO3>127?127:lastO3));      // constrain the value to -128..127
-  memO3=(memO3<-128?-128:(memO3>127?127:memO3));          // constrain the value to -128..127
-  o3=lastO3-volSub3+128;
-  o3=(o3<0?0:o3);
-  
+  if (active3) {
+    cnt3+=freq3;              // timer will automatically wraparound at 65535
+    switch (selectedWave3) {
+      case 0:	o3 = 127 - (cnt3 >> 8); break;     // sawtooth wave
+      case 1:	o3 = (cnt3<32768 ? 100 : -100); break;     // square wave
+      case 2:	o3 = sinetable[cnt3 >> 8] - 128; break;    // sine wave
+    }
+    dist=(o3-lastO3)>>1;                // LPF with resonance
+  //  memO3+=dist*cutoff3/256;
+    //lastO3+=memO3+dist*resonance3/256;
+    memO3+=(dist*cutoff3)>>8;
+    lastO3+=memO3+(((int8_t)dist*(int8_t)(resonance3>>2))>>8);
+    lastO3=(lastO3<-128?-128:(lastO3>127?127:lastO3));      // constrain the value to -128..127
+  //  memO3=(memO3<-128?-128:(memO3>127?127:memO3));          // constrain the value to -128..127
+  //  o3=lastO3-volSub3+128;
+      o3=lastO3+128;
+  } else
+    o3=0;
+//  o3=(o3<0?0:o3);
+  /*
   if (!active1)	o1 = 0;
   if (!active2)	o2 = 0;
   if (!active3)	o3 = 0;
-
+*/
   switch (selectedOperator1) {
-	case 0:
-		dist = o1 + o2;
+  	case 0:
+  		dist = o1 + o2;
 		break;
-	case 1:
-		dist = abs(o1 - o2);
+  	case 1:
+  		dist = abs(o1 - o2);
 		break;
-	case 2:
-		dist = ((((o1 > 200) && (o2 < 200)) || ((o1 < 200) && (o2 > 200))) ? 255 : 0);
+  	case 2:
+  		dist = ((((o1 > operator1Value) && (o2 < operator1Value)) || ((o1 < operator1Value) && (o2 > operator1Value))) ? 255 : 0);
 		break;
-	case 3:
-		dist = ((((o1 > 40) && (o2 < 40))|| ((o1 < 40) && (o2 > 40))) ? 255 : 0);
-		break;
+    case 3:
+      dist = ((((o1 > operator1Value) && (o2 < operator1Value)) || ((o1 < operator1Value) && (o2 > operator1Value))) ? o1 : o2);
+    break;
   }
   switch (selectedOperator2) {
-  case 0:
-	  dist = dist + o3;
+    case 0:
+  	  dist = dist + o3;
 	  break;
-  case 1:
-	  dist = abs(dist - o3);
+    case 1:
+  	  dist = abs(dist - o3);
 	  break;
-  case 2:
-	  dist = ((((dist > 200) && (o3 < 200)) || ((dist < 200) && (o3 > 200))) ? 255 : 0);
+    case 2:
+  	  dist = ((((dist >= operator2Value) && (o3 <= operator2Value)) || ((dist <= operator2Value) && (o3 >= operator2Value))) ? 255 : 0);
 	  break;
-  case 3:
-	  dist = ((((dist > 40) && (o3 < 40)) || ((dist < 40) && (o3 > 40))) ? 255 : 0);
-	  break;
+    case 3:
+      dist = ((((dist >= operator2Value) && (o3 <= operator2Value)) || ((dist <= operator2Value) && (o3 >= operator2Value))) ? dist : o3);
+    break;
   }
 
   OCR0B =(dist<0?0:(dist>255?255:dist));
@@ -298,7 +299,7 @@ ISR(TIMER1_COMPA_vect){//timer 1 interrupt
   }
   else {*/
 	  switch (displayVoice) {
-      case -1: osciBuffer[cnt1 >> 9]=OCR0B;break;
+      case -1: osciBuffer[totalDisplayPointer]=OCR0B; totalDisplayPointer=(totalDisplayPointer+1)&127;break;
   	  case 0: osciBuffer[cnt1 >> 9] = o1; break;
   	  case 1: osciBuffer[cnt2 >> 9] = o2; break;
   	  case 2: osciBuffer[cnt3 >> 9] = o3; break;
@@ -449,28 +450,71 @@ void updateDispBuff(bool stuffIn[]) {
   }
 }
 
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+#endif
+/*
+void ERROR(uint8_t statuscode, uint8_t twsr) {
+  Serial.begin(115200);
+  Serial.print("I2C error ");
+  Serial.print(statuscode);
+  Serial.print(" TWSR=");
+  Serial.println(twsr);
+}
+*/
+void i2c_begin() {
+  // activate internal pullups for twi.
+  digitalWrite(SDA, 1);
+  digitalWrite(SCL, 1);
+  cbi(TWSR, TWPS0);
+  cbi(TWSR, TWPS1);
+  TWBR=0;       // set to highest possible rate
+  TWCR = 1<<TWEN;
+}
+
+void i2c_beginTransmit(uint8_t address) {
+  TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
+  while (!(TWCR & (1<<TWINT)));
+//if ((TWSR & 0xF8) != 0x08) ERROR(1, TWSR&0xf8);     // who needs error checking anyways :-)
+  TWDR = (address<<1)|0;
+  TWCR = (1<<TWINT) | (1<<TWEN);
+  while (!(TWCR & (1<<TWINT)));
+//if ((TWSR & 0xF8) != 0x18) ERROR(2, TWSR&0xf8);     // who needs error checking anyways :-)
+}
+
+void i2c_write(uint8_t b) {
+  TWDR = b;
+  TWCR = (1<<TWINT) | (1<<TWEN);
+  while (!(TWCR & (1<<TWINT)));
+//if ((TWSR & 0xF8) != 0x28) ERROR(3, TWSR&0xf8);     // who needs error checking anyways :-)
+}
+
+void i2c_stop() {
+  TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO);
+}
+
 void oled_init() {
-  Wire.begin();						// Init the I2C interface (pins A4 and A5 on the Arduino Uno board) in Master Mode.
-  TWBR=0;						// Set the I2C to HS mode - 400KHz! TWBR = (CPU_CLK / I2C_CLK) -16 /2. Some report that even 0 is working. **** test it out ****
-  Wire.beginTransmission(OLED_I2C_ADDRESS);		// Begin the I2C comm with SSD1306's address (SLA+Write)
-  Wire.write(OLED_CONTROL_BYTE_CMD_STREAM);		// Tell the SSD1306 that a command stream is incoming
-  Wire.write(OLED_CMD_DISPLAY_OFF);			// Turn the Display OFF
-  Wire.write(OLED_CMD_SET_CONTRAST);			// set contrast
-  Wire.write(0xff);
-  Wire.write(OLED_CMD_SET_VCOMH_DESELCT);		// Set the V_COMH deselect volatage to max (0,83 x Vcc)
-  Wire.write(0x30);
-  Wire.write(OLED_CMD_SET_MEMORY_ADDR_MODE);		// vertical addressing mode
-  Wire.write(0x01);
-  Wire.write(OLED_CMD_SET_CHARGE_PUMP);			// Enable the charge pump
-  Wire.write(0x14);
-  Wire.write(OLED_CMD_DISPLAY_ON);			// Turn the Display ON
-  Wire.write(OLED_CMD_SET_PAGE_RANGE);                  // use the current page
-  Wire.write(0);
-  Wire.write(7);
-  Wire.write(OLED_CMD_SET_COLUMN_RANGE);                // use all columns
-  Wire.write(0);
-  Wire.write(127);
-  Wire.endTransmission();
+  i2c_begin();            // Init the I2C interface (pins A4 and A5 on the Arduino Uno board) in Master Mode.
+//  TWBR=0;           // Set the I2C to HS mode - 400KHz! TWBR = (CPU_CLK / I2C_CLK) -16 /2. Some report that even 0 is working. **** test it out ****
+  i2c_beginTransmit(OLED_I2C_ADDRESS);   // Begin the I2C comm with SSD1306's address (SLA+Write)
+  i2c_write(OLED_CONTROL_BYTE_CMD_STREAM);    // Tell the SSD1306 that a command stream is incoming
+  i2c_write(OLED_CMD_DISPLAY_OFF);     // Turn the Display OFF
+  i2c_write(OLED_CMD_SET_CONTRAST);      // set contrast
+  i2c_write(0xff);
+  i2c_write(OLED_CMD_SET_VCOMH_DESELCT);   // Set the V_COMH deselect volatage to max (0,83 x Vcc)
+  i2c_write(0x30);
+  i2c_write(OLED_CMD_SET_MEMORY_ADDR_MODE);    // vertical addressing mode
+  i2c_write(0x01);
+  i2c_write(OLED_CMD_SET_CHARGE_PUMP);     // Enable the charge pump
+  i2c_write(0x14);
+  i2c_write(OLED_CMD_DISPLAY_ON);      // Turn the Display ON
+  i2c_write(OLED_CMD_SET_PAGE_RANGE);                  // use the current page
+  i2c_write(0);
+  i2c_write(7);
+  i2c_write(OLED_CMD_SET_COLUMN_RANGE);                // use all columns
+  i2c_write(0);
+  i2c_write(127);
+  i2c_stop();
 }
 
 /*
@@ -535,6 +579,14 @@ ISR(TIMER2_COMPA_vect) {
     	    displayVoice = 2;
     	    showInfo(WAVE3);
         break;
+        case 10:
+        case 11:
+          operator1Value=cutRead>>2;
+        break;
+        case 14:
+        case 15:
+          operator2Value=cutRead>>2;
+        break;
       	default:
       		showInfo(0);
           selectedVoice=-1;
@@ -594,20 +646,20 @@ ISR(TIMER2_COMPA_vect) {
     lc.setRow(i, dispBuff[i]);
 }
 
-
 void loop(){
   uint8_t sample, sampleLo, sampleHi;
   uint8_t dispII, page;
   while (true) {
     for (dispII=0; dispII<128; dispII++) {
-      Wire.beginTransmission(OLED_I2C_ADDRESS);
-      Wire.write(OLED_CONTROL_BYTE_DATA_STREAM);
+      i2c_beginTransmit(OLED_I2C_ADDRESS);
+      i2c_write(OLED_CONTROL_BYTE_DATA_STREAM);
       sample=(osciBuffer[127-dispII])>>2;
       sampleLo=1<<(sample&7);
       sampleHi=sample>>3;
       for (page=0; page<8; page++)
-        Wire.write(page==sampleHi?sampleLo:0);
-      Wire.endTransmission();   
+        i2c_write(page==sampleHi?sampleLo:0);
+      i2c_stop(); 
     }
   }
 }
+
